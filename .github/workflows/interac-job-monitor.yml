@@ -1,0 +1,86 @@
+name: Interac Job Monitor
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: interac-job-monitor
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Decide whether this run should check
+        id: window
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          from datetime import datetime
+          from zoneinfo import ZoneInfo
+
+          now = datetime.now(ZoneInfo("America/Toronto"))
+          daytime = 6 <= now.hour < 22
+          top_of_hour = now.minute == 0
+          should_check = daytime or top_of_hour
+          print(f"should_check={'true' if should_check else 'false'}")
+          print(f"local_time={now.isoformat(timespec='minutes')}")
+          PY
+
+      - name: Confirm ntfy topic secret exists
+        if: steps.window.outputs.should_check == 'true'
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: |
+          if [ -z "$NTFY_TOPIC" ]; then
+            echo "Missing required repository secret: NTFY_TOPIC"
+            exit 1
+          fi
+
+      - name: Check Interac jobs
+        id: check
+        if: steps.window.outputs.should_check == 'true'
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: |
+          set +e
+          python3 scripts/interac_job_monitor.py --ntfy
+          status=$?
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          if [ "$status" -eq 1 ]; then
+            exit 1
+          fi
+          exit 0
+
+      - name: Commit updated seen-jobs state
+        if: steps.window.outputs.should_check == 'true'
+        run: |
+          if git diff --quiet -- data/seen_jobs.json; then
+            echo "No state changes to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/seen_jobs.json
+          git commit -m "Update Interac seen jobs state"
+          git pull --rebase
+          git push
+
+      - name: Log skipped run
+        if: steps.window.outputs.should_check != 'true'
+        run: echo "Skipped Interac check at ${{ steps.window.outputs.local_time }} America/Toronto."
