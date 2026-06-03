@@ -1,0 +1,30 @@
+name: Test ntfy Notification
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Confirm ntfy topic secret exists
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: |
+          if [ -z "$NTFY_TOPIC" ]; then
+            echo "Missing required repository secret: NTFY_TOPIC"
+            exit 1
+          fi
+
+      - name: Send test ntfy notification
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: |
+          curl \
+            --fail-with-body \
+            --request POST \
+            --header "Title: GitHub ntfy test" \
+            --header "Tags: white_check_mark" \
+            --data "GitHub Actions can send Interac job alerts to your phone." \
+            "https://ntfy.sh/${NTFY_TOPIC}"
