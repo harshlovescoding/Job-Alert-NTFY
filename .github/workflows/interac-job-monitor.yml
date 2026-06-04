@@ -2,7 +2,8 @@ name: Interac Job Monitor
 
 on:
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "8,23,38,53 * * * *"
+    - cron: "13 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -29,17 +30,27 @@ jobs:
 
       - name: Decide whether this run should check
         id: window
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_SCHEDULE: ${{ github.event.schedule }}
         run: |
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import os
           from datetime import datetime
           from zoneinfo import ZoneInfo
 
           now = datetime.now(ZoneInfo("America/Toronto"))
           daytime = 6 <= now.hour < 22
-          top_of_hour = now.minute == 0
-          should_check = daytime or top_of_hour
+          event_name = os.environ.get("EVENT_NAME", "")
+          event_schedule = os.environ.get("EVENT_SCHEDULE", "")
+          is_quarter_hour_schedule = event_schedule == "8,23,38,53 * * * *"
+          is_hourly_schedule = event_schedule == "13 * * * *"
+          should_check = event_name == "workflow_dispatch"
+          should_check = should_check or (is_quarter_hour_schedule and daytime)
+          should_check = should_check or (is_hourly_schedule and not daytime)
           print(f"should_check={'true' if should_check else 'false'}")
           print(f"local_time={now.isoformat(timespec='minutes')}")
+          print(f"event_schedule={event_schedule or 'manual'}")
           PY
 
       - name: Confirm ntfy topic secret exists
